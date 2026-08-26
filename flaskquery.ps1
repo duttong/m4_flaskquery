@@ -4,6 +4,8 @@
 # Activate the 'flaskq' environment
 conda activate flaskq
 
+cd "C:\Users\hfcms\m4_flaskquery"
+
 # Run your Python script
 python .\flaskquery.py
 
