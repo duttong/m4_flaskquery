@@ -5,7 +5,8 @@ from PyQt5.QtCore import QDate, Qt
 class FlaskQueryApp(QWidget):
     def __init__(self):
         super().__init__()
-        sys.path.append('/Volumes/ccg/src/db/')
+        #sys.path.append('/Volumes/ccg/src/db/')
+        sys.path.append('W:\\src\\db')
         import db_utils.db_conn as db_conn
         self.db = db_conn.HATS_ng()
 
