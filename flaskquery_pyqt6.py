@@ -1,5 +1,5 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QDateEdit, QGroupBox, QFormLayout, QSizePolicy
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QDateEdit, QGroupBox, QFormLayout, QSizePolicy, QMessageBox
 from PyQt6.QtCore import QDate, QtCore
 
 class FlaskQueryApp(QWidget):
@@ -111,6 +111,7 @@ class FlaskQueryApp(QWidget):
             self.date_output.setText('')
             self.pair_output.setText('')
             self.combined_output.setText('')
+            self.show_missing_flask_popup()
             return
        
         # Update output fields
@@ -125,6 +126,13 @@ class FlaskQueryApp(QWidget):
         # Highlight the combined output field text for easy copying
         self.combined_output.selectAll()
         self.combined_output.setFocus()  # Ensure the focus is on the field so the selection is visible
+
+    def show_missing_flask_popup(self):
+        box = QMessageBox(self)
+        box.setWindowTitle('Flask Query')
+        box.setText('Missing Flask ID')
+        box.setStyleSheet("QLabel { color: #b8860b; font-weight: bold; }")
+        box.exec()
 
 def main():
     app = QApplication(sys.argv)
