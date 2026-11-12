@@ -1,9 +1,18 @@
 import os
+import re
 import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QDateEdit, QGroupBox, QFormLayout, QSizePolicy, QMessageBox
 from PyQt5.QtCore import QDate, Qt
 
 DB_SRC = 'W:\\src\\db' if sys.platform == 'win32' else '/Volumes/ccg/src/db/'
+
+# A CCGG flask id (not a HATS flask number), e.g. GRF firn air 'C14#09'.
+# Same set as CCGG_FLASK_ID_RE in itxbin/m4_samplogs.py; needs a letter or '#'
+# so a bare number is always treated as a HATS flask.
+CCGG_FLASK_ID_RE = re.compile(r'^(?=.*[A-Za-z#])[A-Za-z0-9][A-Za-z0-9#_-]{0,19}$')
+# Only match a CCGG event sampled at most this long before the analysis date,
+# as fe3_gcwerks2db.py does, so a reused id doesn't pick up an old event.
+MAX_CCGG_EVENT_AGE_DAYS = 730
 
 
 def _install_posix_shims():
@@ -133,20 +142,46 @@ class FlaskQueryApp(QWidget):
         self.setWindowTitle('Flask Query')
         self.show()
 
-    def query_flask(self):
-        flask_number = self.flask_input.text()
-        analysis_date = self.analysis_date_input.date().toString('yyyy-MM-dd')
-        
+    def query_hats_flask(self, flask_number, analysis_date):
+        """Most recent HATS flask event before the analysis date."""
         sql = """
             SELECT site, pair_id, ev_datetime FROM hats.hatsflask_event_view
             WHERE ev_datetime < %s AND flask_id = %s
             ORDER BY ev_datetime DESC LIMIT 1;
         """
+        ret = self.db.doquery(sql, (analysis_date, flask_number))[0]
+        fill_date = ret['ev_datetime'].strftime('%d %b %y')
+        return ret['site'], fill_date, str(ret['pair_id']), f"{flask_number}-{ret['pair_id']}"
+
+    def query_ccgg_flask(self, flask_id, analysis_date):
+        """Most recent CCGG flask event (e.g. GRF 'C14#09') sampled on or before
+        the analysis date, within MAX_CCGG_EVENT_AGE_DAYS."""
+        sql = """
+            SELECT e.num, e.id, e.date, s.code AS site
+            FROM ccgg.flask_event e
+            JOIN gmd.site s ON s.num = e.site_num
+            WHERE e.id = %s
+              AND e.date <= %s
+              AND e.date >= DATE_SUB(%s, INTERVAL %s DAY)
+            ORDER BY e.date DESC, e.num DESC LIMIT 1;
+        """
+        ret = self.db.doquery(sql, (flask_id, analysis_date, analysis_date,
+                                    MAX_CCGG_EVENT_AGE_DAYS))[0]
+        fill_date = ret['date'].strftime('%d %b %y')
+        # Keep the id as stored in ccgg (e.g. 'C14#09'), whatever case was typed
+        return ret['site'], fill_date, str(ret['num']), ret['id']
+
+    def query_flask(self):
+        flask_number = self.flask_input.text().strip()
+        analysis_date = self.analysis_date_input.date().toString('yyyy-MM-dd')
+        is_ccgg = bool(CCGG_FLASK_ID_RE.fullmatch(flask_number))
+        self.pair_label.setText('CCGG Event:' if is_ccgg else 'Pair ID:')
+
         try:
-            ret = self.db.doquery(sql, (analysis_date, flask_number))[0]
-            site_code = ret['site']
-            fill_date = ret['ev_datetime'].strftime('%d %b %y')
-            pair_id = ret['pair_id']
+            if is_ccgg:
+                site_code, fill_date, pair_id, tag = self.query_ccgg_flask(flask_number, analysis_date)
+            else:
+                site_code, fill_date, pair_id, tag = self.query_hats_flask(flask_number, analysis_date)
         except Exception:
             print(f'ERROR: Perhaps the flask number is not in the database?')
             self.site_output.setText('')
@@ -155,14 +190,14 @@ class FlaskQueryApp(QWidget):
             self.combined_output.setText('')
             self.show_missing_flask_popup()
             return
-       
+
         # Update output fields
         self.site_output.setText(site_code)
         self.date_output.setText(fill_date)
-        self.pair_output.setText(str(pair_id))
+        self.pair_output.setText(pair_id)
 
-        # Update combined field
-        combined_text = f"{site_code.lower()} {fill_date.lower()} #{flask_number}-{pair_id}"
+        # Update combined field (site and date lowercased; CCGG ids keep their case)
+        combined_text = f"{site_code.lower()} {fill_date.lower()} #{tag}"
         self.combined_output.setText(combined_text)
 
         # Highlight the combined output field text for easy copying
