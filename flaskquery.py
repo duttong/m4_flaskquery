@@ -1,14 +1,55 @@
+import os
 import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QDateEdit, QGroupBox, QFormLayout, QSizePolicy, QMessageBox
 from PyQt5.QtCore import QDate, Qt
 
+DB_SRC = 'W:\\src\\db' if sys.platform == 'win32' else '/Volumes/ccg/src/db/'
+
+
+def _install_posix_shims():
+    """nextgen/ccg_config.py does `import pwd` and calls os.geteuid(), which only
+    exist on Unix.  On Windows, provide stand-ins that resolve to the user's home
+    directory so ccg_config can import and look for ~/.db_rw.cnf."""
+    try:
+        import pwd  # noqa: F401  (present on Unix; nothing to do)
+    except ImportError:
+        import getpass
+        import types
+
+        class _PwEntry:
+            pw_name = getpass.getuser()
+            pw_dir = os.path.expanduser('~')
+
+        pwd = types.ModuleType('pwd')
+        pwd.getpwuid = lambda uid: _PwEntry
+        pwd.getpwnam = lambda name: _PwEntry
+        sys.modules['pwd'] = pwd
+    # Non-zero so nothing mistakes the stand-in for root
+    if not hasattr(os, 'geteuid'):
+        os.geteuid = lambda: 1000
+    if not hasattr(os, 'getuid'):
+        os.getuid = lambda: 1000
+
+
+def connect_hats():
+    _install_posix_shims()
+    if DB_SRC not in sys.path:
+        sys.path.append(DB_SRC)
+    import db_utils.db_conn as db_conn
+    # ccg_config only searches Linux paths for .db_rw.cnf; also search the
+    # db_utils copy on the mapped drive.  Read at connect time, so patching works.
+    ccg_config = sys.modules.get('ccg_config')
+    if ccg_config is not None:
+        cnf = os.path.join(DB_SRC, 'db_utils', '.db_rw.cnf')
+        if cnf not in ccg_config.DB_RW_CNFS:
+            ccg_config.DB_RW_CNFS = tuple(ccg_config.DB_RW_CNFS) + (cnf,)
+    return db_conn.HATS_ng()
+
+
 class FlaskQueryApp(QWidget):
     def __init__(self):
         super().__init__()
-        #sys.path.append('/Volumes/ccg/src/db/')
-        sys.path.append('W:\\src\\db')
-        import db_utils.db_conn as db_conn
-        self.db = db_conn.HATS_ng()
+        self.db = connect_hats()
 
         self.initUI()
 
@@ -137,7 +178,16 @@ class FlaskQueryApp(QWidget):
 
 def main():
     app = QApplication(sys.argv)
-    ex = FlaskQueryApp()
+    try:
+        ex = FlaskQueryApp()
+    except Exception:
+        import traceback
+        err = traceback.format_exc()
+        print(err, file=sys.stderr)
+        QMessageBox.critical(None, 'Flask Query - startup failed',
+                             'Could not start Flask Query.\n\n'
+                             'Check that the W: drive is mapped and the database is reachable.\n\n' + err)
+        sys.exit(1)
     sys.exit(app.exec_())
 
 if __name__ == '__main__':
